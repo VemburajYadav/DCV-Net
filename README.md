@@ -13,7 +13,7 @@
 
 <p align="center">
   <a href="">
-    <img src="https://VemburajYadav.github.io/DCV-Net/static/images/dcv_net_arch.png" alt="Logo" width="100%">
+    <img src="https://VemburajYadav.github.io/DCV-Net/static/images/dcv_net_arch.png" alt="Logo" height="60%">
   </a>
 </p>
 
