@@ -1,0 +1,1 @@
+from altcorr.correlation import corr, patchify
