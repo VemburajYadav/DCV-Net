@@ -17,7 +17,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from core.raft import RAFT
 from core.dynamic_raft import DynamicRAFT
-from att_raft import AttRAFT
+from core.att_raft import AttRAFT
 from core.matching_loss import compute_supervision_coarse, backward_warp
 import evaluate
 from core import datasets

@@ -105,7 +105,7 @@ class FlowDataset(data.Dataset):
 
 class MpiSintel(FlowDataset):
     def __init__(self, aug_params=None, split='training',
-                 root='/netscratch/vemburaj/datasets/mpi_sintel/raw', dstype='clean',
+                 root='datasets/mpi_sintel/raw', dstype='clean',
                  return_only_spatial=False):
         super(MpiSintel, self).__init__(aug_params, return_only_spatial=return_only_spatial)
 
@@ -128,7 +128,7 @@ class MpiSintel(FlowDataset):
 
 class FlyingChairs(FlowDataset):
     def __init__(self, aug_params=None, split='train',
-                 root='/netscratch/vemburaj/datasets/flying_chairs_raft_subdirs',
+                 root='datasets/flying_chairs',
                  return_only_spatial=False):
         super(FlyingChairs, self).__init__(aug_params, return_only_spatial=return_only_spatial)
 
@@ -147,7 +147,7 @@ class FlyingChairs(FlowDataset):
 
 
 class FlyingThings3D(FlowDataset):
-    def __init__(self, aug_params=None, root='/netscratch/vemburaj/datasets/flying_things',
+    def __init__(self, aug_params=None, root='datasets/flying_things',
                  dstype='frames_cleanpass', split='training',
                  return_only_spatial=False):
         super(FlyingThings3D, self).__init__(aug_params, return_only_spatial=return_only_spatial)
@@ -178,7 +178,7 @@ class FlyingThings3D(FlowDataset):
 
 class KITTI(FlowDataset):
     def __init__(self, aug_params=None, split='training',
-                 root='/netscratch/vemburaj/datasets/data_scene_flow',
+                 root='datasets/kitti_2015',
                  return_only_spatial=False):
         super(KITTI, self).__init__(aug_params, sparse=True, return_only_spatial=return_only_spatial)
         if split == 'testing':
@@ -198,7 +198,7 @@ class KITTI(FlowDataset):
 
 
 class HD1K(FlowDataset):
-    def __init__(self, aug_params=None, root='/netscratch/vemburaj/datasets/hd1k_full_package', return_only_spatial=False):
+    def __init__(self, aug_params=None, root='datasets/hd1k_full_package', return_only_spatial=False):
         super(HD1K, self).__init__(aug_params, sparse=True, return_only_spatial=return_only_spatial)
 
         seq_ix = 0

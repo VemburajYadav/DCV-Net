@@ -17,10 +17,9 @@ from core.utils import flow_viz
 from core.utils import frame_utils
 from glob import glob
 import os.path as osp
-from att_raft import AttRAFT
+from core.att_raft import AttRAFT
 from core.raft import RAFT
 from core.dynamic_raft import DynamicRAFT
-from dynamic_raft_irr_tile import DynamicIrrTileRAFT
 from core.utils.utils import InputPadder, forward_interpolate
 from core.utils import flow_viz
 
@@ -287,17 +286,14 @@ if __name__ == '__main__':
         model = torch.nn.DataParallel(AttRAFT(args, mode="eval"))
     else:
         if args.dynamic_matching:
-            if args.tile_arch:
-                model = torch.nn.DataParallel(DynamicIrrTileRAFT(args))
-            else:
-                model = torch.nn.DataParallel(DynamicRAFT(args, mode='eval'))
+            model = torch.nn.DataParallel(DynamicRAFT(args, mode='eval'))
         else:
             model = torch.nn.DataParallel(RAFT(args))
 
     if args.model is not None:
         ckpt_file = args.model
     else:
-        experiment_dir = os.path.join("./experiments")
+        experiment_dir = os.path.join("../experiments")
         stage_dir = os.path.join(experiment_dir, args.name)
         ckpt_dir = os.path.join(stage_dir, "ckpt")
         if args.ckpt_step_idx == -1:
@@ -309,9 +305,6 @@ if __name__ == '__main__':
 
     model.cuda()
     model.eval()
-
-    # create_sintel_submission(model.module, warm_start=True)
-    # create_kitti_submission(model.module)
 
     with torch.no_grad():
         validate_sintel_tile(model.module, iters=args.iter_sintel, sigma=args.sintel_tile_sigma, save_only_flow_preds=False)
