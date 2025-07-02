@@ -1,13 +1,16 @@
 import sys
+from pathlib import Path
 from PIL import Image
 import argparse
 import os
 import time
 import numpy as np
 import torch
+import random
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import math
+import cv2
 from core import datasets
 from core.utils import flow_viz
 from core.utils import frame_utils
@@ -18,19 +21,24 @@ from core.raft import RAFT
 from core.dynamic_raft import DynamicRAFT
 from dynamic_raft_irr_tile import DynamicIrrTileRAFT
 from core.utils.utils import InputPadder, forward_interpolate
-
+from core.utils.frame_utils import read_gen
+from glob import glob
+from core.utils.cv2_viz_utils import viz_img_grid, save_frame
+from core.utils.flow_io import readFlowFile, readPngFlowKubrik
+import copy
 
 TRAIN_SIZE = [432, 960]
 
 
 class InputPadder:
     """ Pads images such that dimensions are divisible by 8 """
+
     def __init__(self, dims, mode='sintel'):
         self.ht, self.wd = dims[-2:]
         pad_ht = (((self.ht // 8) + 1) * 8 - self.ht) % 8
         pad_wd = (((self.wd // 8) + 1) * 8 - self.wd) % 8
         if mode == 'sintel':
-            self._pad = [pad_wd//2, pad_wd - pad_wd//2, pad_ht//2, pad_ht - pad_ht//2]
+            self._pad = [pad_wd // 2, pad_wd - pad_wd // 2, pad_ht // 2, pad_ht - pad_ht // 2]
         elif mode == 'kitti432':
             self._pad = [0, 0, 0, 432 - self.ht]
         elif mode == 'kitti400':
@@ -38,14 +46,14 @@ class InputPadder:
         elif mode == 'kitti376':
             self._pad = [0, 0, 0, 376 - self.ht]
         else:
-            self._pad = [pad_wd//2, pad_wd - pad_wd//2, 0, pad_ht]
+            self._pad = [pad_wd // 2, pad_wd - pad_wd // 2, 0, pad_ht]
 
     def pad(self, *inputs):
         return [F.pad(x, self._pad, mode='constant', value=0.0) for x in inputs]
 
-    def unpad(self,x):
+    def unpad(self, x):
         ht, wd = x.shape[-2:]
-        c = [self._pad[2], ht-self._pad[3], self._pad[0], wd-self._pad[1]]
+        c = [self._pad[2], ht - self._pad[3], self._pad[0], wd - self._pad[1]]
         return x[..., c[0]:c[1], c[2]:c[3]]
 
 
@@ -72,11 +80,11 @@ def compute_weight(hws, image_shape, patch_size=TRAIN_SIZE, sigma=1.0, wtype='ga
 
     weights = torch.zeros(1, patch_num, *image_shape)
     for idx, (h, w) in enumerate(hws):
-        weights[:, idx, h:h+patch_size[0], w:w+patch_size[1]] = weights_hw
+        weights[:, idx, h:h + patch_size[0], w:w + patch_size[1]] = weights_hw
     weights = weights.cuda()
     patch_weights = []
     for idx, (h, w) in enumerate(hws):
-        patch_weights.append(weights[:, idx:idx+1, h:h+patch_size[0], w:w+patch_size[1]])
+        patch_weights.append(weights[:, idx:idx + 1, h:h + patch_size[0], w:w + patch_size[1]])
 
     return patch_weights
 
@@ -87,13 +95,13 @@ def create_sintel_submission(model, iters=32, warm_start=False, output_path='sin
     model.eval()
     for dstype in ['clean', 'final']:
         test_dataset = datasets.MpiSintel(split='test', aug_params=None, dstype=dstype)
-        
+
         flow_prev, sequence_prev = None, None
         for test_id in range(len(test_dataset)):
             image1, image2, (sequence, frame) = test_dataset[test_id]
             if sequence != sequence_prev:
                 flow_prev = None
-            
+
             padder = InputPadder(image1.shape)
             image1, image2 = padder.pad(image1[None].cuda(), image2[None].cuda())
 
@@ -102,9 +110,9 @@ def create_sintel_submission(model, iters=32, warm_start=False, output_path='sin
 
             if warm_start:
                 flow_prev = forward_interpolate(flow_low[0])[None].cuda()
-            
+
             output_dir = os.path.join(output_path, dstype, sequence)
-            output_file = os.path.join(output_dir, 'frame%04d.flo' % (frame+1))
+            output_file = os.path.join(output_dir, 'frame%04d.flo' % (frame + 1))
 
             if not os.path.exists(output_dir):
                 os.makedirs(output_dir)
@@ -123,7 +131,7 @@ def create_kitti_submission(model, iters=24, output_path='kitti_submission'):
         os.makedirs(output_path)
 
     for test_id in range(len(test_dataset)):
-        image1, image2, (frame_id, ) = test_dataset[test_id]
+        image1, image2, (frame_id,) = test_dataset[test_id]
         padder = InputPadder(image1.shape, mode='kitti')
         image1, image2 = padder.pad(image1[None].cuda(), image2[None].cuda())
 
@@ -147,7 +155,7 @@ def validate_chairs(model, iters=24):
         image2 = image2[None].cuda()
 
         _, flow_pr = model(image1, image2, iters=iters, test_mode=True)
-        epe = torch.sum((flow_pr[0].cpu() - flow_gt)**2, dim=0).sqrt()
+        epe = torch.sum((flow_pr[0].cpu() - flow_gt) ** 2, dim=0).sqrt()
         epe_list.append(epe.view(-1).numpy())
 
     epe = np.mean(np.concatenate(epe_list))
@@ -163,7 +171,7 @@ def validate_sintel(model, iters=32):
     for dstype in ['clean', 'final']:
         val_dataset = datasets.MpiSintel(split='training', dstype=dstype)
         epe_list = []
-        s_less_10_list= []
+        s_less_10_list = []
         s_10_to_40_list = []
         s_greater_40_list = []
 
@@ -184,11 +192,11 @@ def validate_sintel(model, iters=32):
             # flow = flow_pr[0].cpu()
             flow = padder.unpad(flow_pr[0]).cpu()
 
-            epe = torch.sum((flow - flow_gt)**2, dim=0).sqrt()
+            epe = torch.sum((flow - flow_gt) ** 2, dim=0).sqrt()
             epe = epe.view(-1)
             epe_list.append(epe.numpy())
 
-            flow_gt_mag = torch.sum(flow_gt**2, dim=0).sqrt()
+            flow_gt_mag = torch.sum(flow_gt ** 2, dim=0).sqrt()
             flow_gt_mag = flow_gt_mag.view(-1)
 
             valid_mask_less_10 = (flow_gt_mag < 10)
@@ -209,9 +217,9 @@ def validate_sintel(model, iters=32):
         epe_s_10_to_40 = np.mean(epe_s_10_to_40_all)
         epe_s_greater_40 = np.mean(epe_s_greater_40_all)
 
-        px1 = np.mean(epe_all<1)
-        px3 = np.mean(epe_all<3)
-        px5 = np.mean(epe_all<5)
+        px1 = np.mean(epe_all < 1)
+        px3 = np.mean(epe_all < 3)
+        px5 = np.mean(epe_all < 5)
 
         print("Validation Sintel(%s) EPE: %f, 1px: %f, 3px: %f, 5px: %f" % (dstype, epe, px1, px3, px5))
         print("Validation Sintel(%s) EPE (Displacement range split) s<10: %f, s10-40: %f, s>40: %f" %
@@ -231,7 +239,6 @@ def validate_sintel_tile(model, sigma=0.05, iters=32):
 
     IMAGE_SIZE = [436, 1024]
     TRAIN_SIZE = [432, 960]
-    # TRAIN_SIZE = [416, 928]
 
     hws = compute_grid_indices(IMAGE_SIZE)
     weights = compute_weight(hws, IMAGE_SIZE, TRAIN_SIZE, sigma)
@@ -242,7 +249,7 @@ def validate_sintel_tile(model, sigma=0.05, iters=32):
         val_dataset = datasets.MpiSintel(split='training', dstype=dstype)
 
         epe_list = []
-        s_less_10_list= []
+        s_less_10_list = []
         s_10_to_40_list = []
         s_greater_40_list = []
 
@@ -258,25 +265,25 @@ def validate_sintel_tile(model, sigma=0.05, iters=32):
             flow_count = 0
 
             for idx, (h, w) in enumerate(hws):
-                image1_tile = image1[:, :, h:h+TRAIN_SIZE[0], w:w+TRAIN_SIZE[1]]
-                image2_tile = image2[:, :, h:h+TRAIN_SIZE[0], w:w+TRAIN_SIZE[1]]
+                image1_tile = image1[:, :, h:h + TRAIN_SIZE[0], w:w + TRAIN_SIZE[1]]
+                image2_tile = image2[:, :, h:h + TRAIN_SIZE[0], w:w + TRAIN_SIZE[1]]
 
                 # flow_pre, _ = model(image1_tile, image2_tile, flow_init=None)
                 flow_low, flow_pr = model(image1_tile, image2_tile, iters=iters, test_mode=True)
                 # flow = padder.unpad(flow_pr[0]).cpu()
 
-                padding = (w, IMAGE_SIZE[1]-w-TRAIN_SIZE[1], h, IMAGE_SIZE[0]-h-TRAIN_SIZE[0], 0, 0)
+                padding = (w, IMAGE_SIZE[1] - w - TRAIN_SIZE[1], h, IMAGE_SIZE[0] - h - TRAIN_SIZE[0], 0, 0)
                 flows += F.pad(flow_pr * weights[idx], padding)
                 flow_count += F.pad(weights[idx], padding)
 
             flow_pre = flows / flow_count
             flow_pre = flow_pre[0].cpu()
 
-            epe = torch.sum((flow_pre - flow_gt)**2, dim=0).sqrt()
+            epe = torch.sum((flow_pre - flow_gt) ** 2, dim=0).sqrt()
             epe = epe.view(-1)
             epe_list.append(epe.numpy())
 
-            flow_gt_mag = torch.sum(flow_gt**2, dim=0).sqrt()
+            flow_gt_mag = torch.sum(flow_gt ** 2, dim=0).sqrt()
             flow_gt_mag = flow_gt_mag.view(-1)
 
             valid_mask_less_10 = (flow_gt_mag < 10)
@@ -297,9 +304,9 @@ def validate_sintel_tile(model, sigma=0.05, iters=32):
         epe_s_10_to_40 = np.mean(epe_s_10_to_40_all)
         epe_s_greater_40 = np.mean(epe_s_greater_40_all)
 
-        px1 = np.mean(epe_all<1)
-        px3 = np.mean(epe_all<3)
-        px5 = np.mean(epe_all<5)
+        px1 = np.mean(epe_all < 1)
+        px3 = np.mean(epe_all < 3)
+        px5 = np.mean(epe_all < 5)
 
         print("Validation Sintel(%s) EPE: %f, 1px: %f, 3px: %f, 5px: %f" % (dstype, epe, px1, px3, px5))
         print("Validation Sintel(%s) EPE (Displacement range split) s<10: %f, s10-40: %f, s>40: %f" %
@@ -325,20 +332,20 @@ def validate_kitti(model, iters=24):
         image1 = image1[None].cuda()
         image2 = image2[None].cuda()
 
-        padder = InputPadder(image1.shape)
+        padder = InputPadder(image1.shape, mode='kitti')
         image1, image2 = padder.pad(image1, image2)
 
         flow_low, flow_pr = model(image1, image2, iters=iters, test_mode=True)
         flow = padder.unpad(flow_pr[0]).cpu()
 
-        epe = torch.sum((flow - flow_gt)**2, dim=0).sqrt()
-        mag = torch.sum(flow_gt**2, dim=0).sqrt()
+        epe = torch.sum((flow - flow_gt) ** 2, dim=0).sqrt()
+        mag = torch.sum(flow_gt ** 2, dim=0).sqrt()
 
         epe = epe.view(-1)
         mag = mag.view(-1)
         val = valid_gt.view(-1) >= 0.5
 
-        out = ((epe > 3.0) & ((epe/mag) > 0.05)).float()
+        out = ((epe > 3.0) & ((epe / mag) > 0.05)).float()
         epe_list.append(epe[val].mean().item())
         out_list.append(out[val].cpu().numpy())
 
@@ -355,8 +362,8 @@ def validate_kitti(model, iters=24):
 @torch.no_grad()
 def validate_kitti_tile(model, sigma=0.05, iters=24):
     IMAGE_SIZE = [376, 1242]
-    TRAIN_SIZE = [376, 720]
-    # TRAIN_SIZE = [368, 928]
+    # TRAIN_SIZE = [376, 960]
+    TRAIN_SIZE = [368, 928]
 
     hws = compute_grid_indices(IMAGE_SIZE, TRAIN_SIZE)
     weights = compute_weight(hws, IMAGE_SIZE, TRAIN_SIZE, sigma)
@@ -376,29 +383,33 @@ def validate_kitti_tile(model, sigma=0.05, iters=24):
 
         padder = InputPadder(image1.shape, mode='kitti376')
         image1, image2 = padder.pad(image1[None].cuda(), image2[None].cuda())
+        # IMAGE_SIZE = image1.shape[2:]
+        # hws = compute_grid_indices(IMAGE_SIZE, TRAIN_SIZE)
+        # weights = compute_weight(hws, IMAGE_SIZE, TRAIN_SIZE, sigma)
 
         flows = 0
         flow_count = 0
 
         for idx, (h, w) in enumerate(hws):
-            image1_tile = image1[:, :, h:h+TRAIN_SIZE[0], w:w+TRAIN_SIZE[1]]
-            image2_tile = image2[:, :, h:h+TRAIN_SIZE[0], w:w+TRAIN_SIZE[1]]
+            image1_tile = image1[:, :, h:h + TRAIN_SIZE[0], w:w + TRAIN_SIZE[1]]
+            image2_tile = image2[:, :, h:h + TRAIN_SIZE[0], w:w + TRAIN_SIZE[1]]
+            # flow_pre, flow_low = model(image1_tile, image2_tile)
             flow_low, flow_pr = model(image1_tile, image2_tile, iters=iters, test_mode=True)
 
-            padding = (w, IMAGE_SIZE[1]-w-TRAIN_SIZE[1], h, IMAGE_SIZE[0]-h-TRAIN_SIZE[0], 0, 0)
+            padding = (w, IMAGE_SIZE[1] - w - TRAIN_SIZE[1], h, IMAGE_SIZE[0] - h - TRAIN_SIZE[0], 0, 0)
             flows += F.pad(flow_pr * weights[idx], padding)
             flow_count += F.pad(weights[idx], padding)
 
         flow_pre = flows / flow_count
         flow = padder.unpad(flow_pre[0]).cpu()
-        epe = torch.sum((flow - flow_gt)**2, dim=0).sqrt()
-        mag = torch.sum(flow_gt**2, dim=0).sqrt()
+        epe = torch.sum((flow - flow_gt) ** 2, dim=0).sqrt()
+        mag = torch.sum(flow_gt ** 2, dim=0).sqrt()
 
         epe = epe.view(-1)
         mag = mag.view(-1)
         val = valid_gt.view(-1) >= 0.5
 
-        out = ((epe > 3.0) & ((epe/mag) > 0.05)).float()
+        out = ((epe > 3.0) & ((epe / mag) > 0.05)).float()
         epe_list.append(epe[val].mean().item())
         out_list.append(out[val].cpu().numpy())
 
@@ -412,6 +423,229 @@ def validate_kitti_tile(model, sigma=0.05, iters=24):
     return {'kitti-epe': epe, 'kitti-f1': f1}
 
 
+def inference_one_pair_tiled(model, img1, img2, sigma=0.05, iters=32):
+
+    TRAIN_SIZE = [432, 960]
+
+    img1 = torch.from_numpy(img1).permute(2, 0, 1).float()
+    img2 = torch.from_numpy(img2).permute(2, 0, 1).float()
+
+    image1 = img1[None].cuda()
+    image2 = img2[None].cuda()
+
+    # padder = InputPadder(img1.shape, mode="sintel")
+    # image1, image2 = padder.pad(image1, image2)
+
+    IMAGE_SIZE = image1.shape[2:]
+
+    if IMAGE_SIZE[1] < TRAIN_SIZE[1]:
+        TRAIN_SIZE[1] = IMAGE_SIZE[1]
+    if IMAGE_SIZE[0] < TRAIN_SIZE[0]:
+        TRAIN_SIZE[0] = IMAGE_SIZE[0]
+
+    print("TRAIN_SIZE: ", TRAIN_SIZE)
+    hws = compute_grid_indices(IMAGE_SIZE, TRAIN_SIZE)
+    print("hws: ", hws)
+    weights = compute_weight(hws, IMAGE_SIZE, TRAIN_SIZE, sigma)
+    flows = 0
+    flow_count = 0
+
+    for idx, (h, w) in enumerate(hws):
+        image1_tile = image1[:, :, h:h + TRAIN_SIZE[0], w:w + TRAIN_SIZE[1]]
+        image2_tile = image2[:, :, h:h + TRAIN_SIZE[0], w:w + TRAIN_SIZE[1]]
+
+        flow_low, flow_pr = model(image1_tile, image2_tile, iters=iters, test_mode=True)
+
+        padding = (w, IMAGE_SIZE[1] - w - TRAIN_SIZE[1], h, IMAGE_SIZE[0] - h - TRAIN_SIZE[0], 0, 0)
+        flows += F.pad(flow_pr * weights[idx], padding)
+        flow_count += F.pad(weights[idx], padding)
+
+    flow_pre = flows / flow_count
+    flow_pre = flow_pre[0].cpu().permute(1, 2, 0).numpy()
+
+    return flow_pre
+
+
+def inference_one_pair(model, img1, img2, sigma=0.05, iters=32):
+
+    img1 = torch.from_numpy(img1).permute(2, 0, 1).float()
+    img2 = torch.from_numpy(img2).permute(2, 0, 1).float()
+
+    image1 = img1[None].cuda()
+    image2 = img2[None].cuda()
+
+    padder = InputPadder(img1.shape, mode="sintel")
+    image1, image2 = padder.pad(image1, image2)
+
+    flow_low, flow_pr = model(image1, image2, iters=iters, test_mode=True)
+    flow_pre = padder.unpad(flow_pr[0]).cpu().permute(1, 2, 0).numpy()
+
+    return flow_pre
+
+
+
+def load_sample_sintel(img1_path, img2_path, flow_gt_path=None):
+    image1 = read_gen(img1_path)
+    image2 = read_gen(img2_path)
+
+    if flow_gt_path is not None:
+        flow_gt = read_gen(flow_gt_path)
+        return image1, image2, flow_gt
+    return image1, image2, None
+
+def load_sample_kitti(img1_path, img2_path, flow_gt_path=None):
+    pass
+
+def load_sample_things(img1_path, img2_path, flow_gt_path=None):
+    pass
+
+def load_sample(img1_path, img2_path, flow_gt_path=None, invalid_mask_path=None, dataset=None):
+    print(img1_path, img2_path, flow_gt_path)
+    image1 = np.array(read_gen(img1_path)).astype(np.uint8)
+    image2 = np.array(read_gen(img2_path)).astype(np.uint8)
+
+    if dataset is not None and dataset == "kubrik-nk":
+        image1 = image1[:, :, :3]
+        image2 = image2[:, :, :3]
+
+    print("image1: ", image1.shape, image1.min(), image1.max())
+    print("image2: ", image2.shape, image2.min(), image2.max())
+
+    if flow_gt_path is not None:
+        if dataset is not None and dataset == "kubrik-nk":
+            flow_gt = readPngFlowKubrik(flow_gt_path).astype(np.float32)
+            flow_gt = flow_gt[:, :, [1, 0]]
+        else:
+            flow_gt = readFlowFile(flow_gt_path).astype(np.float32)
+
+        if dataset is not None and dataset == "spring":
+            flow_gt = flow_gt[::2, ::2]
+        print("flow_gt: ", flow_gt.shape, flow_gt.min(), flow_gt.max())
+
+        if invalid_mask_path is not None:
+            invalid_mask = readFlowFile(invalid_mask_path).astype(np.float32) > 0
+        else:
+            flow_u, flow_v = flow_gt[:, :, 0], flow_gt[:, :, 1]
+            invalid_mask_nan = np.logical_or(np.isnan(flow_u), np.isnan(flow_v))
+            invalid_mask_thresh = np.logical_or(np.abs(flow_u) > 10000, np.abs(flow_v) > 10000)
+            invalid_mask = np.logical_or(invalid_mask_nan, invalid_mask_thresh)
+            print(np.isnan(flow_u).sum(), np.isnan(flow_v).sum())
+            flow_gt[invalid_mask, :] = 0.0
+            print("invalid_mask (thresh): ", invalid_mask.shape, invalid_mask.min(), invalid_mask.max(), invalid_mask.sum())
+            print(np.isnan(flow_u).sum(), np.isnan(flow_v).sum())
+
+        print("flow_gt: ", flow_gt.shape, flow_gt.min(), flow_gt.max())
+
+        return image1, image2, flow_gt, invalid_mask
+
+    return image1, image2, None, None
+
+def load_sample_spring(img1_path, img2_path, flow_gt_path=None):
+    pass
+
+def load_sample_kubrik_1k(img1_path, img2_path, flow_gt_path=None):
+    pass
+
+def get_input_paths(scene_dir, dataset='tartanair', load_gt_flow=True):
+    if dataset == "tartanair":
+        image_dir = scene_dir / "image_left"
+        flow_dir = scene_dir / "flow"
+
+        images_list = list(sorted(glob(os.path.join(str(image_dir), "*.png"))))
+
+        if load_gt_flow:
+            flows_list = list(sorted(glob(os.path.join(str(flow_dir), "*flow.npy"))))
+            masks_list = list(sorted(glob(os.path.join(str(flow_dir), "*mask.npy"))))
+        else:
+            flows_list = [None for _ in range(len(images_list) - 1)]
+            masks_list = [None for _ in range(len(images_list) - 1)]
+
+        img_pairs_list = []
+        for i in range(len(images_list) - 1):
+            img_pairs_list += [[images_list[i], images_list[i + 1]]]
+
+        print(len(img_pairs_list), len(flows_list), len(masks_list))
+
+    elif dataset == "spring":
+        image_dir = scene_dir / "frame_left"
+        flow_dir = scene_dir / "flow_FW_left"
+
+        images_list = list(sorted(glob(os.path.join(str(image_dir), "*.png"))))
+
+        if load_gt_flow:
+            flows_list = list(sorted(glob(os.path.join(str(flow_dir), "*.flo5"))))[:-1]
+        else:
+            flows_list = [None for _ in range(len(images_list) - 1)]
+        masks_list = [None for _ in range(len(images_list) - 1)]
+
+        img_pairs_list = []
+        for i in range(len(images_list) - 1):
+            img_pairs_list += [[images_list[i], images_list[i + 1]]]
+
+    elif dataset == "kubrik-nk":
+        image_dir = copy.copy(scene_dir)
+        scene = str(scene_dir).split("/")[-1]
+        base_dir = str(scene_dir).split("/")[:-4]
+        base_dir = "/".join(base_dir)
+        flow_dir = Path(base_dir) / "forward_flow_1k" / "forward_flow" / "1k" / scene
+
+        print("dataset: ", image_dir, flow_dir)
+        images_list = list(sorted(glob(os.path.join(str(image_dir), "*.png"))))
+
+        if load_gt_flow:
+            flows_list = list(sorted(glob(os.path.join(str(flow_dir), "*.png"))))[:-1]
+        else:
+            flows_list = [None for _ in range(len(images_list) - 1)]
+        masks_list = [None for _ in range(len(images_list) - 1)]
+
+        img_pairs_list = []
+        for i in range(len(images_list) - 1):
+            img_pairs_list += [[images_list[i], images_list[i + 1]]]
+
+    elif dataset == "sintel":
+        image_dir = copy.copy(scene_dir)
+        scene = str(scene_dir).split("/")[-1]
+        base_dir = str(scene_dir).split("/")[:-2]
+        base_dir = "/".join(base_dir)
+        flow_dir = Path(base_dir) / "flow" / scene
+
+        print("dataset: ", image_dir, flow_dir)
+        images_list = list(sorted(glob(os.path.join(str(image_dir), "*.png"))))
+
+        if load_gt_flow:
+            flows_list = list(sorted(glob(os.path.join(str(flow_dir), "*.flo"))))
+        else:
+            flows_list = [None for _ in range(len(images_list) - 1)]
+        masks_list = [None for _ in range(len(images_list) - 1)]
+
+        img_pairs_list = []
+        for i in range(len(images_list) - 1):
+            img_pairs_list += [[images_list[i], images_list[i + 1]]]
+
+    elif dataset == "bonn-dynamic":
+        image_dir = Path(scene_dir) / "rgb"
+
+        images_list = list(sorted(glob(os.path.join(str(image_dir), "*.png"))))
+        img_pairs_list = []
+        for i in range(len(images_list) - 1):
+            img_pairs_list += [[images_list[i], images_list[i + 1]]]
+
+        flows_list = [None for _ in range(len(images_list) - 1)]
+        masks_list = [None for _ in range(len(images_list) - 1)]
+
+    elif dataset == "h2o3d":
+        image_dir = Path(scene_dir) / "rgb"
+
+        images_list = list(sorted(glob(os.path.join(str(image_dir), "*.jpg"))))[::5]
+        img_pairs_list = []
+        for i in range(len(images_list) - 1):
+            img_pairs_list += [[images_list[i], images_list[i + 1]]]
+
+        flows_list = [None for _ in range(len(images_list) - 1)]
+        masks_list = [None for _ in range(len(images_list) - 1)]
+
+    return img_pairs_list, flows_list, masks_list
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', help="restore checkpoint")
@@ -419,6 +653,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--tile_arch', action='store_true', help='tiled architecture')
     parser.add_argument('--name', default='raft-things', help="name your experiment")
+    parser.add_argument('--stage', default='things', help="training stage")
     parser.add_argument('--dataset', type=str, nargs='+', help="dataset(s) for evaluation")
     parser.add_argument('--small', action='store_true', help='use small model')
     parser.add_argument('--mixed_precision', action='store_true', help='use mixed precision')
@@ -431,7 +666,8 @@ if __name__ == '__main__':
     parser.add_argument('--cosine_sim', action='store_true', help='use cosine similarity for cost volume')
     parser.add_argument('--cosine_simv2', action='store_true', help='use cosine similarity for cost volume '
                                                                     '(feature map norm)')
-    parser.add_argument('--mixed_sim', action='store_true', help='use dot product and cosine similarity for cost volume')
+    parser.add_argument('--mixed_sim', action='store_true',
+                        help='use dot product and cosine similarity for cost volume')
     parser.add_argument('--cv_softmax', action='store_true', help='apply softmax on the cost volume')
     parser.add_argument('--lookup_softmax', action='store_true', help='apply softmax on the cost volume after lookup')
     parser.add_argument('--lookup_softmax_all', action='store_true', help='apply softmax on the cost volume after '
@@ -457,11 +693,11 @@ if __name__ == '__main__':
                         help='gamma for focal loss')
 
     parser.add_argument('--att_nhead', type=int, default=4, help="number of attention heads for multi-head attention")
-    parser.add_argument('--att_layer_layout', type=str, nargs='+', default=["self","cross"],
+    parser.add_argument('--att_layer_layout', type=str, nargs='+', default=["self", "cross"],
                         help="layout of self and cross attention layers per feature update")
     parser.add_argument('--att_layer_type', type=str, default="linear",
                         help="type of attention to apply per attention layer. Options: linear, quadtree, full")
-    parser.add_argument('--att_weight_share_after',  type=int, default=-1,
+    parser.add_argument('--att_weight_share_after', type=int, default=-1,
                         help='share the weights of the transformer block across the update '
                              'iterations except for the first '
                              'att_weight_share_after iterations')
@@ -497,22 +733,47 @@ if __name__ == '__main__':
     parser.add_argument('--iter_sintel', type=int, default=32)
     parser.add_argument('--iter_kitti', type=int, default=24)
     parser.add_argument('--sintel_tile_sigma', type=float, default=0.05, help='exponential weighting')
+    parser.add_argument('--scene_dir', type=str, default="linear",
+                        help="path to the scene directory")
+    parser.add_argument('--save_dir', type=str, default="linear",
+                        help="path to the output directory")
+    parser.add_argument('--save_images', action='store_true', help='save input images')
+    parser.add_argument('--save_flow_pred', action='store_true', help='save predicted flow images')
+    parser.add_argument('--save_flow_gt', action='store_true', help='save ground truth flow images')
+    parser.add_argument('--save_flow_pred_with_epe', action='store_true', help='save predicted flow images (with EPE)')
+
+    seed = 1234
+    print("[ Using Seed : ", seed, " ]")
+
+    torch.manual_seed(1234)
+    np.random.seed(1234)
+
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.cuda.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
     args = parser.parse_args()
 
     print("Name of the experiment under evaluation: ", args.name)
     print(args)
 
+    scene_dir = Path(args.scene_dir)
+    output_dir = Path(args.save_dir)
+
     if args.att_raft:
-        model = torch.nn.DataParallel(AttRAFT(args, mode="eval"))
+        model = torch.nn.DataParallel(AttRAFT(args, mode="eval"), device_ids=[0])
     else:
         if args.dynamic_matching:
             if args.tile_arch:
-                model = torch.nn.DataParallel(DynamicIrrTileRAFT(args))
+                model = torch.nn.DataParallel(DynamicIrrTileRAFT(args), device_ids=[0])
             else:
-                model = torch.nn.DataParallel(DynamicRAFT(args, mode='eval'))
+                model = torch.nn.DataParallel(DynamicRAFT(args, mode='eval'), device_ids=[0])
         else:
-            model = torch.nn.DataParallel(RAFT(args))
+            model = torch.nn.DataParallel(RAFT(args), device_ids=[0])
 
     if args.model is not None:
         ckpt_file = args.model
@@ -534,20 +795,80 @@ if __name__ == '__main__':
     # create_kitti_submission(model.module)
 
     with torch.no_grad():
-        for dataset in args.dataset:
-            if dataset == 'chairs':
-                validate_chairs(model.module)
+        print("dataset: ", args.dataset)
+        img_pairs_list, flows_list, masks_list = get_input_paths(scene_dir, dataset=args.dataset[0])
 
-            elif dataset == 'sintel':
-                validate_sintel(model.module, iters=args.iter_sintel)
+        for i in range(len(img_pairs_list)):
+            image1, image2, flow_gt, invalid_mask = load_sample(img_pairs_list[i][0], img_pairs_list[i][1],
+                                                        flows_list[i], masks_list[i], dataset=args.dataset[0])
 
-            elif dataset == 'kitti':
-                validate_kitti(model.module, iters=args.iter_kitti)
+            if "wo-tile" in args.stage:
+                flow_pred = inference_one_pair(model.module, image1, image2)
+            else:
+                flow_pred = inference_one_pair_tiled(model.module, image1, image2)
 
-            elif dataset == 'sintel_tile':
-                validate_sintel_tile(model.module, iters=args.iter_sintel, sigma=args.sintel_tile_sigma)
+            print("flow prediction: ", flow_pred.shape, flow_pred.min(), flow_pred.max())
 
-            elif dataset == 'kitti_tile':
-                validate_kitti_tile(model.module, iters=args.iter_kitti)
+            if flow_gt is not None:
+                flow_u, flow_v = flow_gt[:, :, 0], flow_gt[:, :, 1]
+                if invalid_mask is not None:
+                    valid_pixels_mask = np.logical_not(invalid_mask)
+                    max_mag = np.sqrt(flow_u[valid_pixels_mask]**2 + flow_v[valid_pixels_mask]**2).max()
+                else:
+                    max_mag = np.sqrt(flow_u**2 + flow_v**2).max()
+            else:
+                max_mag = None
+
+            if args.save_images:
+                img1_dir = output_dir / "image1"
+                img2_dir = output_dir / "image2"
+
+                img1_path = os.path.join(str(img1_dir), os.path.basename(img_pairs_list[i][0]))
+                img2_path = os.path.join(str(img2_dir), os.path.basename(img_pairs_list[i][1]))
+
+                save_frame(image1, img1_path)
+                save_frame(image2, img2_path)
+
+            if args.save_flow_gt:
+                flow_gt_dir = output_dir / "flow_gt"
+                flow_gt_path = os.path.join(str(flow_gt_dir),
+                                            os.path.basename(flows_list[i]).split(".")[0] + ".png")
+                flow_gt_img = flow_viz.flow_to_image(flow_gt, max_scale=max_mag)
+                save_frame(flow_gt_img, flow_gt_path)
+
+            if args.save_flow_pred:
+                flow_pred_dir = output_dir / args.stage / "flow_pred"
+                if flows_list[i] is not None:
+                    flow_pred_path = os.path.join(str(flow_pred_dir),
+                                                  os.path.basename(flows_list[i]).split(".")[0] + ".png")
+                else:
+                    flow_pred_path = os.path.join(str(flow_pred_dir),
+                                                  os.path.basename(img_pairs_list[i][0]))
+                flow_pred_img = flow_viz.flow_to_image(flow_pred, max_scale=max_mag)
+                save_frame(flow_pred_img, flow_pred_path)
+
+            if args.save_flow_pred_with_epe and flow_gt is not None:
+                flow_pred_with_epe_dir = output_dir / args.stage / "flow_pred_with_epe"
+                flow_pred_with_epe_path = os.path.join(str(flow_pred_with_epe_dir),
+                                                       os.path.basename(flows_list[i]).split(".")[0] + ".png")
+                valid_mask = np.logical_not(invalid_mask)
+                epe = np.sqrt(np.sum((flow_gt - flow_pred) ** 2, axis=2))
+                epe = epe.reshape(-1)[valid_mask.reshape(-1)].mean()
+
+                epe_str = "EPE: {:.2f}".format(epe)
+                str_grid = [[epe_str]]
+                viz_frame = viz_img_grid([[flow_pred_img]], str_grid=str_grid, spacing=0)
+                save_frame(viz_frame, flow_pred_with_epe_path, convert_to_bgr=False)
+
+
+
+
+
+
+
+
+
+
+
 
 

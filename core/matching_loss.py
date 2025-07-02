@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-from core.utils.utils import coords_grid, bilinear_sampler
+from .utils.utils import coords_grid, bilinear_sampler
 import numpy as np
 
 

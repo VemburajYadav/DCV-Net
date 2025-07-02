@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from core.transformers.utils.position_encoding import PositionEncodingSine
+from ...transformers.utils.position_encoding import PositionEncodingSine
 
 
 def split_feature(feature,

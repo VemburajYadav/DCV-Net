@@ -3,13 +3,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from core.update import BasicUpdateBlock, SmallUpdateBlock
-from core.extractor import BasicEncoder, SmallEncoder
-from core.transformers.backbone import twins_svt_large, twins_svt_large_context
-from core.corr import CorrBlock, CudaCorrBlock, CosineCorrBlock, MixedCorrBlock
-from core.transformers.utils.position_encoding import PositionEncodingSine
-from core.transformers.feature_transformer import FeatureTransformer
-from core.utils.utils import bilinear_sampler, coords_grid, upflow8
+from .update import BasicUpdateBlock, SmallUpdateBlock
+from .extractor import BasicEncoder, SmallEncoder
+from .transformers.backbone import twins_svt_large, twins_svt_large_context
+from .corr import CorrBlock, CudaCorrBlock, CosineCorrBlock, MixedCorrBlock
+from .transformers.utils.position_encoding import PositionEncodingSine
+from .transformers.feature_transformer import FeatureTransformer
+from .utils.utils import bilinear_sampler, coords_grid, upflow8
 from einops import rearrange
 
 try:

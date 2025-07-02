@@ -1,5 +1,5 @@
 import torch
-import cuda_corr
+# import cuda_corr
 
 
 class CorrLayer(torch.autograd.Function):

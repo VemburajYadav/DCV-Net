@@ -9,7 +9,7 @@
 
   </p>
   <h3 align="center">IMVIP 2023 </h3>
-  <h3 align="center"><a href="https://zenodo.org/records/8253052?token=eyJhbGciOiJIUzUxMiJ9.eyJpZCI6ImI5NGI1MDRjLTMzNzAtNDI4Ny1iMzhiLWMyZjA2NjUyOWRjOCIsImRhdGEiOnt9LCJyYW5kb20iOiI0M2UxYWViN2Y0MmZhOThiZjFhZjUxNDAyOGU5NGMwYSJ9.9zCutVq6zeBHFwYMDgTiPqiXVDA7Y9KIUSGBQFUBSzJqTk4eVwZbXDF3YVhDHE-9_9G4IAMuQKva45ejs07jwg">Paper</a> | <a href="https://VemburajYadav.github.io/DCV-Net/">Project Page</a> | <a href="https://drive.google.com/drive/folders/1cqZx2Vl8Vf6XtpPPG2QA52GmjjDa3AkL?usp=drive_link">Pretrained Models</a> </h3>
+  <h3 align="center"><a href="https://zenodo.org/records/8253052?token=eyJhbGciOiJIUzUxMiJ9.eyJpZCI6ImI5NGI1MDRjLTMzNzAtNDI4Ny1iMzhiLWMyZjA2NjUyOWRjOCIsImRhdGEiOnt9LCJyYW5kb20iOiI0M2UxYWViN2Y0MmZhOThiZjFhZjUxNDAyOGU5NGMwYSJ9.9zCutVq6zeBHFwYMDgTiPqiXVDA7Y9KIUSGBQFUBSzJqTk4eVwZbXDF3YVhDHE-9_9G4IAMuQKva45ejs07jwg">Paper</a> | <a href="https://VemburajYadav.github.io/DCV-Net/">Project Page</a> | <a href="https://drive.google.com/drive/folders/1sv9UPbe8hR6H60VqiCYGzlQbeuxqR8SS?usp=sharing">Pretrained Models</a> </h3>
 
 <p align="center">
   <a href="">

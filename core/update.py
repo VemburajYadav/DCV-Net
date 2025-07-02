@@ -77,7 +77,7 @@ class SmallMotionEncoder(nn.Module):
         return torch.cat([out, flow], dim=1)
 
 
-class FlowEncoder(nn. Module):
+class FlowEncoder(nn.Module):
     def __init__(self, hidden_dim=256, output_dim=256, hidden_k=3, output_k=1):
         super(FlowEncoder, self).__init__()
 

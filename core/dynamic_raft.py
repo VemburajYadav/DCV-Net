@@ -3,17 +3,17 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from core.update import BasicUpdateBlock, SmallUpdateBlock, FlowEncoder, BasicUpdateBlockNoEncoder, BasicMotionEncoder, MergeVisualHidden
-from core.extractor import BasicEncoder, SmallEncoder
-from core.transformers.backbone import twins_svt_large, twins_svt_large_context
-from core.corr import CorrBlock, CudaCorrBlock, CosineCorrBlock, MixedCorrBlock
-from core.transformers.utils.position_encoding import PositionEncodingSine
-from core.transformers.feature_transformer import FeatureTransformer, FeatureFlowTransformer
-from core.transformers.utils.swin_utils import SwinPosEncoding, SwinShiftedWindowAttnMask
-from core.transformers.swin_attention import generate_shift_window_attn_mask
-from core.transformers.gma import GMAAttention, GMAAggregate
-from core.utils.utils import bilinear_sampler, coords_grid, upflow8
-from core.matching_loss import compute_supervision_coarse, get_occlusion_map
+from .update import BasicUpdateBlock, SmallUpdateBlock, FlowEncoder, BasicUpdateBlockNoEncoder, BasicMotionEncoder, MergeVisualHidden
+from .extractor import BasicEncoder, SmallEncoder
+from .transformers.backbone import twins_svt_large, twins_svt_large_context
+from .corr import CorrBlock, CudaCorrBlock, CosineCorrBlock, MixedCorrBlock
+from .transformers.utils.position_encoding import PositionEncodingSine
+from .transformers.feature_transformer import FeatureTransformer, FeatureFlowTransformer
+from .transformers.utils.swin_utils import SwinPosEncoding, SwinShiftedWindowAttnMask
+from .transformers.swin_attention import generate_shift_window_attn_mask
+from .transformers.gma import GMAAttention, GMAAggregate
+from .utils.utils import bilinear_sampler, coords_grid, upflow8
+from .matching_loss import compute_supervision_coarse, get_occlusion_map
 from einops import rearrange
 
 try:
